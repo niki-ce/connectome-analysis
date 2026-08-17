@@ -960,7 +960,9 @@ def stochastic_spread_model(M, n_steps=100,
                             decay=1.0,
                             sum_exclusion=True,
                             return_history=False,
-                            node_can_spread=None):
+                            node_can_spread=None,
+                            exclude_candidates=True,
+                            strict_spread=True,):
     """
     Builds a stochastic spread graph. See https://doi.org/10.1101/2025.08.21.671478
 
@@ -992,7 +994,7 @@ def stochastic_spread_model(M, n_steps=100,
         This leads to shorter degree distributions.
     sum_exclusion : bool
         Determines how the node exclusion rule is updated. If True, then once a candidate node has been
-        rejected once from spread it can not be spread to in future steps. If False, then it is only 
+        rejected once from spread it can not be spread to in any future steps. If False, then it is only 
         excluded in the next step.
     return_history : bool
         If True, then a second output is returned (see below).
@@ -1001,7 +1003,10 @@ def stochastic_spread_model(M, n_steps=100,
         via the spreading mechanism. That is, for nodes where the corresponding entry of `node_can_spread` is 
         False, the out-degree will be set to 0. If provided, the length of the iterable must match the first
         dimension of `M`. If not provided, all nodes will spread.
-    
+    exclude_candidates : bool
+        Determines how the node exclusion rule is updated. If True, then any candidate node can be spread to 
+        in future steps. If false, then candidate nodes that were rejected can be spread to 
+        in future steps. 
     Returns
     ----------
     full_instance : sparse.matrix
@@ -1016,7 +1021,7 @@ def stochastic_spread_model(M, n_steps=100,
     ValueError
         If M contains any float weights > 1.0
     ValueError
-        If M has bool data type and q is not used.
+        If M has bool data type and q is not used
     ValueError
         If tgt_level is not one of ["mean", "individual"]
     ValueError
@@ -1036,6 +1041,9 @@ def stochastic_spread_model(M, n_steps=100,
     if (decay < 0) or (decay > 1.0):
         raise ValueError("Parameter decay must be between 0 and 1!")
     sum_exclusion = bool(sum_exclusion)
+    exclude_candidates = bool(exclude_candidates)
+    strict_spread = bool(strict_spread)
+
 
     # Setting up the initial
     exclusion = sp.coo_matrix(([], ([], [])), shape=M.shape)
@@ -1052,7 +1060,6 @@ def stochastic_spread_model(M, n_steps=100,
             diagonals=np.array(node_can_spread, dtype=int),
             offsets=0, shape=M.shape, format="csr"
         )
-    M = M.transpose()
 
     # Set up output lists
     row = []
@@ -1063,8 +1070,14 @@ def stochastic_spread_model(M, n_steps=100,
     # Main loop
     for _step in range(n_steps):
         # Where the process can spread to. Subtracting exclusion ensures values < 0
-        candidates = state * M - 1E6 * (exclusion + initial)
-        candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0)
+        if strict_spread and M.dtype == float:
+            M_bool = M.astype(bool)
+            candidates = state * M_bool - 1E6 * (exclusion + initial)
+            candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0) #each entry is either 0 or 1
+            candidates = candidates.multiply(M) #check that this is elementwise and works!
+        else:
+            candidates = state * M - 1E6 * (exclusion + initial)
+            candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0)
 
         # Scaling of spread probabilities based on configuration
         if q is not None:
@@ -1076,7 +1089,7 @@ def stochastic_spread_model(M, n_steps=100,
             q = q * decay
         else:
             fac = None
-            
+
         # Take a new step
         new_state = evaluate_probs(candidates, adjust=fac, less_random=(_step < n_protected))
         row.extend(new_state.row)
@@ -1090,9 +1103,15 @@ def stochastic_spread_model(M, n_steps=100,
 
         # Update exclusion rule
         if sum_exclusion:
-            exclusion = exclusion + state
+            if exclude_candidates:
+                exclusion = exclusion + candidates
+            else:
+                exclusion = exclusion + state
         else:
-            exclusion = state
+            if exclude_candidates:
+                exclusion = candidates
+            else:
+                exclusion = state
         state = new_state
 
     # Create output matrix
