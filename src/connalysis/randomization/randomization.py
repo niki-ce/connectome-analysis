@@ -958,6 +958,7 @@ def stochastic_spread_model(M, n_steps=100,
                             n_protected=0, q=10.0, 
                             tgt_level="individual",
                             decay=1.0,
+                            r=None, 
                             sum_exclusion=True,
                             return_history=False,
                             node_can_spread=None,
@@ -971,7 +972,8 @@ def stochastic_spread_model(M, n_steps=100,
     M : sparse.matrix
         Adjacency matrix of the underlying graph to spread on. If data type is float then the weight
         specifies the probability that the corresponding edge is crossed in a step. This weight / probability
-        is further scaled if parameter q is specified. If data type is bool, then q _must_ be specified.
+        is further scaled if parameter q is specified. If data type is bool, then q _must_ be specified if 
+        strict_spread is set to False and either r or q _must_ be specified if strict_spread is set to True.
     n_steps : int
         Maximum number of steps to evaluate. Should be picked `large enough` that the spreading process
         terminates naturally from lack of new nodes instead of reaching this maximum.
@@ -992,6 +994,9 @@ def stochastic_spread_model(M, n_steps=100,
     decay : float
         Must be between 0 and 1. Paramter q is multiplied by this value after each step, reducing its value.
         This leads to shorter degree distributions.
+    r : float 
+        Must be between 0 and 1. It is the spread probability used when strict_spread is set to True. If 
+        strict_spread is set to True and r is set to None, then q must be specified. 
     sum_exclusion : bool
         Determines how the node exclusion rule is updated. If True, then once a candidate node has been
         rejected once from spread it can not be spread to in any future steps. If False, then it is only 
@@ -1018,10 +1023,10 @@ def stochastic_spread_model(M, n_steps=100,
     
     Raises
     ----------
-    ValueError
+    alueError
         If M contains any float weights > 1.0
     ValueError
-        If M has bool data type and q is not used
+        If M has bool data type and neither q nor r is used.
     ValueError
         If tgt_level is not one of ["mean", "individual"]
     ValueError
@@ -1030,12 +1035,19 @@ def stochastic_spread_model(M, n_steps=100,
         If node_can_spread is provided and its length does not match M
     """
     # Checking and setting up input variables
-    if M.dtype != bool:
-        if np.any(M.data > 1.0):
-            raise ValueError("Weights in input matrix must be <= 1.0!")
-    else:
+    if strict_spread:
         if q is None:
-            raise ValueError("If q is set to None, then M must specify probabilities (float between 0 and 1)!")
+            if r is None:
+                raise ValueError("If strict_spread is set to True and q is set to None, then r must be specified")
+            if r < 0 or r > 1:
+                raise ValueError("Parameter r must be between 0 and 1!")
+    else:
+        if M.dtype == bool:
+            if q is None:
+                raise ValueError("If strict_spread is set to False and q is set to None, then M must specify probabilities (float between 0 and 1)!")
+        else:
+            if np.any(M.data > 1.0):
+                raise ValueError("Weights in input matrix must be <= 1.0!")
     if tgt_level not in ["mean", "individual"]:
         raise ValueError(f"Unknown value for tgt_level: {tgt_level}. Expected one of ['mean', 'individual']!")
     if (decay < 0) or (decay > 1.0):
@@ -1070,14 +1082,14 @@ def stochastic_spread_model(M, n_steps=100,
     # Main loop
     for _step in range(n_steps):
         # Where the process can spread to. Subtracting exclusion ensures values < 0
-        if strict_spread and M.dtype == float:
-            M_bool = M.astype(bool)
-            candidates = state * M_bool - 1E6 * (exclusion + initial)
-            candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0) #each entry is either 0 or 1
-            candidates = candidates.multiply(M) #check that this is elementwise and works!
-        else:
-            candidates = state * M - 1E6 * (exclusion + initial)
-            candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0)
+        candidates = state * M - 1E6 * (exclusion + initial)
+        candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0)
+        candidates.eliminate_zeros()
+
+        if strict_spread:
+            candidates.data = np.ones(candidates.data.shape)
+            if r is not None:
+                candidates.data = r * candidates.data    
 
         # Scaling of spread probabilities based on configuration
         if q is not None:
