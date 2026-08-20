@@ -1023,10 +1023,14 @@ def stochastic_spread_model(M, n_steps=100,
     
     Raises
     ----------
-    alueError
+    ValueError
         If M contains any float weights > 1.0
     ValueError
-        If M has bool data type and neither q nor r is used.
+        If strict_spreas is True and neither r nor q are used.
+    ValueError
+        If strict_spreas is True and r is not between [0, 1]
+    ValueError
+        If strict_spreas is False, M has bool data type and q is not used.
     ValueError
         If tgt_level is not one of ["mean", "individual"]
     ValueError
@@ -1036,11 +1040,11 @@ def stochastic_spread_model(M, n_steps=100,
     """
     # Checking and setting up input variables
     if strict_spread:
-        if q is None:
-            if r is None:
-                raise ValueError("If strict_spread is set to True and q is set to None, then r must be specified")
-            if r < 0 or r > 1:
-                raise ValueError("Parameter r must be between 0 and 1!")
+        if r is None:
+            if q is None:
+                raise ValueError("If strict_spread is set to True and r is set to None, then q must be specified")
+        elif r < 0 or r > 1:
+            raise ValueError("Parameter r must be between 0 and 1!")
     else:
         if M.dtype == bool:
             if q is None:
@@ -1135,3 +1139,4 @@ def stochastic_spread_model(M, n_steps=100,
     if return_history:
         return full_instance, history
     return full_instance
+
