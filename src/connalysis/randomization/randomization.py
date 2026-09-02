@@ -954,16 +954,15 @@ def random_geometric_model(pts, pts_x=None, n_neighbors=None, dist_neighbors=Non
     return sp.csc_matrix((len(pts), len(pts)), dtype=bool)
 
 
-def stochastic_spread_model(M, n_steps=100,
-                            n_protected=0, q=10.0, 
-                            tgt_level="individual",
-                            decay=1.0,
-                            r=None, 
-                            sum_exclusion=True,
-                            return_history=False,
-                            node_can_spread=None,
+def stochastic_spread_model(M, r=None, q=10.0,
+                            sum_exclusion=True, 
                             exclude_candidates=True,
-                            strict_spread=True,):
+                            decay=1.0,
+                            node_can_spread=None,
+                            n_protected=0, 
+                            tgt_level="individual",
+                            n_steps=100, 
+                            return_history=False):
     """
     Builds a stochastic spread graph. See https://doi.org/10.1101/2025.08.21.671478
 
@@ -972,46 +971,45 @@ def stochastic_spread_model(M, n_steps=100,
     M : sparse.matrix
         Adjacency matrix of the underlying graph to spread on. If data type is float then the weight
         specifies the probability that the corresponding edge is crossed in a step. This weight / probability
-        is further scaled if parameter q is specified. If data type is bool, then q _must_ be specified if 
-        strict_spread is set to False and either r or q _must_ be specified if strict_spread is set to True.
-    n_steps : int
-        Maximum number of steps to evaluate. Should be picked `large enough` that the spreading process
-        terminates naturally from lack of new nodes instead of reaching this maximum.
-    n_protected : int
-        Number of initial steps to take with reduced stochasticity. For this number of steps the process 
-        for a given source node will spread to exactly the expected number of nodes instead of a randomly
-        determined number. This avoids a large number of source nodes with zero out-degree. Set to 0 to
-        not use this feature.
+        is further scaled if parameter q is specified. If data type is bool, then q or r _must_ be specified. 
+        If r is specified, data type must be bool. 
+    r : float 
+        Spread probability. Must be between 0 and 1.
     q : float 
         Sets the expected number of nodes to spread to in each step. This is done by scaling the weights in
-        M with weights dynamically determined in each step. If the data type of M is boolean, all entries
-        in M are interpreted as 1.0 and q must be provided to determine "proper" weights.
-        Set to None to not use this feature.
-    tgt_level : str
-        One of "mean" or "individual". Specifies how parameter q is interpreted. If "individual", then one 
-        scaling factor per source node is calculated. If "mean", then one global factor is used. If q is
-        set to None, then this is ignored. Using "mean" leads to more diverse degree distributions.
-    decay : float
-        Must be between 0 and 1. Paramter q is multiplied by this value after each step, reducing its value.
-        This leads to shorter degree distributions.
-    r : float 
-        Must be between 0 and 1. It is the spread probability used when strict_spread is set to True. If 
-        strict_spread is set to True and r is set to None, then q must be specified. 
+        M with weights dynamically determined in each step. Set to None to not use this feature. If r is not 
+        None, then q must be None.
     sum_exclusion : bool
         Determines how the node exclusion rule is updated. If True, then once a candidate node has been
-        rejected once from spread it can not be spread to in any future steps. If False, then it is only 
+        rejected from spread it can not be spread to in any future steps. If False, then it is only 
         excluded in the next step.
-    return_history : bool
-        If True, then a second output is returned (see below).
+    exclude_candidates : bool
+        Determines how the node exclusion rule is updated. If True, then nodes that were candidates in previous
+        steps can not be spread to in future steps. If false, then candidate nodes that were rejected can be 
+        spread to in future steps. 
+    decay : float
+        Must be between 0 and 1. Paramters q or r are multiplied by this value after each step, reducing their value.
+        This leads to shorter degree distributions.
     node_can_spread : iterable
         Individual elements must be bool. If provided, it specifies which nodes "grow" outgoing connections
         via the spreading mechanism. That is, for nodes where the corresponding entry of `node_can_spread` is 
         False, the out-degree will be set to 0. If provided, the length of the iterable must match the first
         dimension of `M`. If not provided, all nodes will spread.
-    exclude_candidates : bool
-        Determines how the node exclusion rule is updated. If True, then any candidate node can be spread to 
-        in future steps. If false, then candidate nodes that were rejected can be spread to 
-        in future steps. 
+    n_protected : int
+        Number of initial steps to take with reduced stochasticity. For this number of steps the process 
+        for a given source node will spread to exactly the expected number of nodes instead of a randomly
+        determined number. This avoids a large number of source nodes with zero out-degree. Set to 0 to
+        not use this feature.
+    tgt_level : str
+        One of "mean" or "individual". Specifies how parameter q is interpreted. If "individual", then one 
+        scaling factor per source node is calculated. If "mean", then one global factor is used. If q is
+        set to None, then this is ignored. Using "mean" leads to more diverse degree distributions.
+    n_steps : int
+        Maximum number of steps to evaluate. Should be picked `large enough` that the spreading process
+        terminates naturally from lack of new nodes instead of reaching this maximum.
+    return_history : bool
+        If True, then a second output is returned (see below).
+
     Returns
     ----------
     full_instance : sparse.matrix
@@ -1023,14 +1021,14 @@ def stochastic_spread_model(M, n_steps=100,
     
     Raises
     ----------
+    ValueError 
+        If r is not None and M has float data type. 
+    ValueError 
+        If r is not None and q is not None. 
     ValueError
-        If M contains any float weights > 1.0
-    ValueError
-        If strict_spreas is True and neither r nor q are used.
-    ValueError
-        If strict_spreas is True and r is not between [0, 1]
-    ValueError
-        If strict_spreas is False, M has bool data type and q is not used.
+        If r is None and M contains any float weights > 1.0.
+    ValueError 
+        If r and q are None and M has bool data type. 
     ValueError
         If tgt_level is not one of ["mean", "individual"]
     ValueError
@@ -1038,28 +1036,28 @@ def stochastic_spread_model(M, n_steps=100,
     ValueError
         If node_can_spread is provided and its length does not match M
     """
+
     # Checking and setting up input variables
-    if strict_spread:
-        if r is None:
-            if q is None:
-                raise ValueError("If strict_spread is set to True and r is set to None, then q must be specified")
-        elif r < 0 or r > 1:
-            raise ValueError("Parameter r must be between 0 and 1!")
-    else:
-        if M.dtype == bool:
-            if q is None:
-                raise ValueError("If strict_spread is set to False and q is set to None, then M must specify probabilities (float between 0 and 1)!")
-        else:
+    if r is None:
+        if not (M.dtype == bool):
             if np.any(M.data > 1.0):
                 raise ValueError("Weights in input matrix must be <= 1.0!")
+        if q is None:
+            if M.dtype == bool:
+                raise ValueError("If r and q are set to None, then M must specify probabilities (float between 0 and 1)!")
+    elif r < 0 or r > 1:
+        raise ValueError("Parameter r must be between 0 and 1!")
+    else:
+        if not (M.dtype == bool):
+            raise ValueError("If r is not None, then M must have bool data type")
+        if q is not None:
+            raise ValueError("If r is not None, then must be None") 
     if tgt_level not in ["mean", "individual"]:
         raise ValueError(f"Unknown value for tgt_level: {tgt_level}. Expected one of ['mean', 'individual']!")
     if (decay < 0) or (decay > 1.0):
         raise ValueError("Parameter decay must be between 0 and 1!")
     sum_exclusion = bool(sum_exclusion)
     exclude_candidates = bool(exclude_candidates)
-    strict_spread = bool(strict_spread)
-
 
     # Setting up the initial
     exclusion = sp.coo_matrix(([], ([], [])), shape=M.shape)
@@ -1089,11 +1087,10 @@ def stochastic_spread_model(M, n_steps=100,
         candidates = state * M - 1E6 * (exclusion + initial)
         candidates.data = np.minimum(np.maximum(candidates.data, 0), 1.0)
         candidates.eliminate_zeros()
-
-        if strict_spread:
-            candidates.data = np.ones(candidates.data.shape)
-            if r is not None:
-                candidates.data = r * candidates.data    
+            
+        if r is not None:
+            candidates.data = r * candidates.data  
+            r = r * decay  
 
         # Scaling of spread probabilities based on configuration
         if q is not None:
