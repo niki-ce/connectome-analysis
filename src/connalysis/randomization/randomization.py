@@ -953,7 +953,6 @@ def random_geometric_model(pts, pts_x=None, n_neighbors=None, dist_neighbors=Non
     # Fallback: Return empty matrix.
     return sp.csc_matrix((len(pts), len(pts)), dtype=bool)
 
-
 def stochastic_spread_model(M, r=None, q=10.0,
                             sum_exclusion=True, 
                             exclude_candidates=True,
@@ -1107,7 +1106,7 @@ def stochastic_spread_model(M, r=None, q=10.0,
         new_state = evaluate_probs(candidates, adjust=fac, less_random=(_step < n_protected))
         row.extend(new_state.row)
         col.extend(new_state.col)
-        data.extend(_step * np.ones(new_state.nnz, dtype=int))
+        data.extend((_step+1) * np.ones(new_state.nnz, dtype=int))
         new_state = new_state.tocsr()
 
         # Step added to history
@@ -1129,10 +1128,9 @@ def stochastic_spread_model(M, r=None, q=10.0,
 
     # Create output matrix
     full_instance = sp.coo_matrix((
-        np.ones(len(row), dtype=bool),
-        (row, col)
+        data, (row, col)
     ), shape=M.shape).tocsr()
-
+    
     if return_history:
         return full_instance, history
     return full_instance
