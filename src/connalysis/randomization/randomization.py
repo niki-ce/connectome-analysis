@@ -1007,12 +1007,17 @@ def stochastic_spread_model(M, r=None, q=10.0,
         Maximum number of steps to evaluate. Should be picked `large enough` that the spreading process
         terminates naturally from lack of new nodes instead of reaching this maximum.
     return_history : bool
-        If True, then a second output is returned (see below).
+        If False, the function only returns a (binary) adjacency matrix of the output graph. If True, it 
+        instead returns an adjacency matrix where each entry has an integer indicating the step at which that 
+        edge was created (0 if the edge does not exist) and a list specifying, for each step, 
+        the mean number of nodes that the process spread to. To be used to improve parameter fitting or
+        for debugging.
 
     Returns
     ----------
     full_instance : sparse.matrix
-        Adjacency matrix of the output graph
+        Adjacency matrix of the output graph. It is binary if return_history if False, and if it is True its
+        entries indicate the step at which each edge was created.
     history : list
         Optional output only returned if `return_history` is True. List specifying for each evaluated
         step the mean number of nodes that the process spread to. To be used to improve parameter fitting or
@@ -1108,7 +1113,6 @@ def stochastic_spread_model(M, r=None, q=10.0,
         col.extend(new_state.col)
         data.extend((_step+1) * np.ones(new_state.nnz, dtype=int))
         new_state = new_state.tocsr()
-
         # Step added to history
         h_i = new_state.sum(axis=1).mean()  # Mean number added per original neuron
         history.append(h_i)
@@ -1127,11 +1131,15 @@ def stochastic_spread_model(M, r=None, q=10.0,
         state = new_state
 
     # Create output matrix
-    full_instance = sp.coo_matrix((
-        data, (row, col)
-    ), shape=M.shape).tocsr()
-    
     if return_history:
+        full_instance = sp.coo_matrix((
+                data, (row, col)
+            ), shape=M.shape).tocsr()
         return full_instance, history
-    return full_instance
+    else:
+        full_instance = sp.coo_matrix((
+            np.ones(len(row), dtype=bool),
+            (row, col)
+        ), shape=M.shape).tocsr()   
+        return full_instance
 
